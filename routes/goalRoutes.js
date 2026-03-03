@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { getGoals, createGoal, updateGoal, deleteGoal, addMilestone } = require('../controllers/goalController');
-const { authenticate } = require('../middleware/auth');
+const authenticate = require('../middleware/auth');
 
 router.use(authenticate);
 router.get('/', getGoals);
