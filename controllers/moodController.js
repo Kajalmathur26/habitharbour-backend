@@ -1,5 +1,6 @@
 const supabase = require('../config/supabase');
 
+// GET /api/mood
 const getMoods = async (req, res) => {
   try {
     const { start_date, end_date } = req.query;
@@ -20,6 +21,7 @@ const getMoods = async (req, res) => {
   }
 };
 
+// POST /api/mood
 const logMood = async (req, res) => {
   try {
     const { mood_score, mood_label, notes, emotions, log_date } = req.body;
@@ -47,6 +49,7 @@ const logMood = async (req, res) => {
   }
 };
 
+// GET /api/mood/stats
 const getMoodStats = async (req, res) => {
   try {
     const thirtyDaysAgo = new Date();
@@ -73,4 +76,68 @@ const getMoodStats = async (req, res) => {
   }
 };
 
-module.exports = { getMoods, logMood, getMoodStats };
+// PUT /api/mood/:id  → Update a mood log
+const updateMood = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { id } = req.params;
+    const updates = { ...req.body };
+    delete updates.user_id; // prevent updating user_id
+
+    const { data, error } = await supabase
+      .from('mood_logs')
+      .update({ ...updates, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .eq('user_id', userId)
+      .select()
+      .single();
+
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// GET /api/mood/trend?days=7|30 → Get mood trend for past N days
+const getMoodTrend = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const days = parseInt(req.query.days) || 7;
+
+    const since = new Date();
+    since.setDate(since.getDate() - days + 1);
+    const sinceStr = since.toISOString().split('T')[0];
+
+    const { data, error } = await supabase
+      .from('mood_logs')
+      .select('mood_score, emotions, log_date, notes')
+      .eq('user_id', userId)
+      .gte('log_date', sinceStr)
+      .order('log_date');
+
+    if (error) throw error;
+
+    // Fill missing dates with null entries
+    const trend = [];
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const dateStr = d.toISOString().split('T')[0];
+      const entry = data.find(m => m.log_date === dateStr);
+      trend.push({
+        date: dateStr,
+        label: d.toLocaleDateString('default', { month: 'short', day: 'numeric' }),
+        score: entry?.mood_score ?? null,
+        emotions: entry?.emotions ?? [],
+        notes: entry?.notes ?? ''
+      });
+    }
+
+    res.json({ success: true, data: trend });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+module.exports = { getMoods, logMood, getMoodStats, updateMood, getMoodTrend };

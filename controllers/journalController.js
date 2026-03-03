@@ -1,5 +1,8 @@
 const supabase = require('../config/supabase');
 
+// -------------------- Entries -------------------- //
+
+// GET /api/journal
 const getEntries = async (req, res) => {
   try {
     const { start_date, end_date, search } = req.query;
@@ -21,6 +24,7 @@ const getEntries = async (req, res) => {
   }
 };
 
+// GET /api/journal/:id
 const getEntry = async (req, res) => {
   try {
     const { id } = req.params;
@@ -38,20 +42,39 @@ const getEntry = async (req, res) => {
   }
 };
 
+// POST /api/journal
 const createEntry = async (req, res) => {
   try {
-    const { title, content, entry_date, mood, tags, is_private } = req.body;
+    const userId = req.user.id;
+    const {
+      title = 'Untitled Entry',
+      content = '',
+      entry_date,
+      mood,
+      tags = [],
+      is_private = true,
+      images = [],
+      stickers = [],
+      font_family = 'Inter',
+      font_color = '#1f2937',
+      font_size = 16
+    } = req.body;
 
     const { data, error } = await supabase
       .from('journal_entries')
       .insert([{
-        user_id: req.user.id,
-        title: title || 'Untitled Entry',
-        content: content || '',
+        user_id: userId,
+        title,
+        content,
         entry_date: entry_date || new Date().toISOString().split('T')[0],
         mood,
-        tags: tags || [],
-        is_private: is_private !== undefined ? is_private : true
+        tags,
+        is_private,
+        images,
+        stickers,
+        font_family,
+        font_color,
+        font_size
       }])
       .select()
       .single();
@@ -63,12 +86,16 @@ const createEntry = async (req, res) => {
   }
 };
 
+// PUT /api/journal/:id
 const updateEntry = async (req, res) => {
   try {
     const { id } = req.params;
+    const updates = { ...req.body, updated_at: new Date().toISOString() };
+    delete updates.user_id; // prevent updating user_id
+
     const { data, error } = await supabase
       .from('journal_entries')
-      .update({ ...req.body, updated_at: new Date().toISOString() })
+      .update(updates)
       .eq('id', id)
       .eq('user_id', req.user.id)
       .select()
@@ -81,6 +108,7 @@ const updateEntry = async (req, res) => {
   }
 };
 
+// DELETE /api/journal/:id
 const deleteEntry = async (req, res) => {
   try {
     const { id } = req.params;
@@ -97,4 +125,37 @@ const deleteEntry = async (req, res) => {
   }
 };
 
-module.exports = { getEntries, getEntry, createEntry, updateEntry, deleteEntry };
+// -------------------- Upload Images -------------------- //
+
+// POST /api/journal/upload-image
+const uploadImage = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const file = req.file;
+    if (!file) return res.status(400).json({ success: false, message: 'No file provided' });
+
+    const ext = file.mimetype.split('/')[1];
+    const path = `journal/${userId}-${Date.now()}.${ext}`;
+
+    const { error: upErr } = await supabase.storage
+      .from('planora-media')
+      .upload(path, file.buffer, { contentType: file.mimetype, upsert: false });
+    if (upErr) throw upErr;
+
+    const { data: { publicUrl } } = supabase.storage.from('planora-media').getPublicUrl(path);
+    res.json({ success: true, data: { url: publicUrl } });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// -------------------- Exports -------------------- //
+
+module.exports = {
+  getEntries,
+  getEntry,
+  createEntry,
+  updateEntry,
+  deleteEntry,
+  uploadImage
+};

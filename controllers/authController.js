@@ -2,10 +2,12 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const supabase = require('../config/supabase');
 
+// Generate JWT token
 const generateToken = (userId) => {
   return jwt.sign({ userId }, process.env.JWT_SECRET, { expiresIn: '7d' });
 };
 
+// Register a new user
 const register = async (req, res) => {
   try {
     const { name, email, password } = req.body;
@@ -29,7 +31,9 @@ const register = async (req, res) => {
 
     const { data: user, error } = await supabase
       .from('users')
-      .insert([{ name, email, password: hashedPassword, preferences: { theme: 'dark', accent: 'violet' } }])
+      .insert([
+        { name, email, password: hashedPassword, preferences: { theme: 'dark', accent: 'violet' } }
+      ])
       .select('id, name, email, preferences, created_at')
       .single();
 
@@ -43,6 +47,7 @@ const register = async (req, res) => {
   }
 };
 
+// Login user
 const login = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -53,7 +58,7 @@ const login = async (req, res) => {
 
     const { data: user, error } = await supabase
       .from('users')
-      .select('id, name, email, password, preferences')
+      .select('id, name, email, password, preferences, avatar_url, phone')
       .eq('email', email)
       .single();
 
@@ -76,29 +81,98 @@ const login = async (req, res) => {
   }
 };
 
+// Get user profile
 const getProfile = async (req, res) => {
   res.json({ user: req.user });
 };
 
+// Update user profile (extend to avatar_url and phone)
 const updateProfile = async (req, res) => {
   try {
-    const { name, preferences } = req.body;
-    const updates = {};
-    if (name) updates.name = name;
-    if (preferences) updates.preferences = preferences;
+    const userId = req.user.id;
+    const { name, preferences, avatar_url, phone } = req.body;
 
-    const { data: user, error } = await supabase
+    const updates = {};
+    if (name !== undefined) updates.name = name;
+    if (preferences !== undefined) updates.preferences = preferences;
+    if (avatar_url !== undefined) updates.avatar_url = avatar_url;
+    if (phone !== undefined) updates.phone = phone;
+    updates.updated_at = new Date().toISOString();
+
+    const { data, error } = await supabase
       .from('users')
       .update(updates)
-      .eq('id', req.user.id)
-      .select('id, name, email, preferences')
+      .eq('id', userId)
+      .select()
       .single();
 
     if (error) throw error;
-    res.json({ user });
-  } catch (error) {
-    res.status(500).json({ error: 'Update failed' });
+    res.json({ success: true, data });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
   }
 };
 
-module.exports = { register, login, getProfile, updateProfile };
+// Upload avatar using Supabase Storage
+const uploadAvatar = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const file = req.file; // multer buffer
+
+    if (!file) return res.status(400).json({ success: false, message: 'No file uploaded' });
+
+    const fileName = `avatars/${userId}-${Date.now()}.${file.mimetype.split('/')[1]}`;
+
+    // Upload to Supabase Storage
+    const { error: uploadError } = await supabase.storage
+      .from('planora-media')
+      .upload(fileName, file.buffer, {
+        contentType: file.mimetype,
+        upsert: true,
+      });
+
+    if (uploadError) throw uploadError;
+
+    const { data: { publicUrl } } = supabase.storage
+      .from('planora-media')
+      .getPublicUrl(fileName);
+
+    // Update user record with avatar URL
+    await supabase
+      .from('users')
+      .update({ avatar_url: publicUrl })
+      .eq('id', userId);
+
+    res.json({ success: true, data: { avatar_url: publicUrl } });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// Delete account
+const deleteAccount = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    // Cascade deletes should be handled by FK constraints in DB
+    const { error } = await supabase
+      .from('users')
+      .delete()
+      .eq('id', userId);
+
+    if (error) throw error;
+
+    res.json({ success: true, message: 'Account deleted successfully' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+module.exports = {
+  register,
+  login,
+  getProfile,
+  updateProfile,
+  uploadAvatar,
+  deleteAccount,
+};
