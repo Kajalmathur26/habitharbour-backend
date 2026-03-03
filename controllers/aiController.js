@@ -4,16 +4,16 @@ const supabase = require('../config/supabase');
 // ---------- Helpers ---------- //
 
 const getGenAI = () => {
-  // if (!process.env.GEMINI_API_KEY) {
-  //   throw new Error('Gemini API key not configured');
-  // }
+  if (!process.env.GEMINI_API_KEY) {
+    throw new Error('Gemini API key not configured');
+  }
   return new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 };
 
 const getModel = () => {
   const genAI = getGenAI();
   return genAI.getGenerativeModel({
-    model: 'gemini-1.5-flash', // ✅ stable working model
+    model: 'gemini-2.5-flash', // ✅ stable working model
   });
 };
 
@@ -148,7 +148,7 @@ const chatWithAI = async (req, res) => {
     }
 
     const systemContext = `
-You are Harbor, a friendly AI assistant for HabitHarbor (a daily growth tracking app).
+You are Plora, a friendly AI assistant for Planora (a digital planner and journal app).
 You help with tasks, goals, habits, mood tracking, and journaling.
 
 User name: ${req.user.name}

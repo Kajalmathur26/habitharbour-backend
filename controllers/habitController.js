@@ -1,8 +1,8 @@
 const supabase = require('../config/supabase');
 
-// Get all habits for the user
 const getHabits = async (req, res) => {
   try {
+    const today = new Date().toISOString().split('T')[0];
     const { data: habits, error } = await supabase
       .from('habits')
       .select('*, habit_logs(*)')
@@ -16,7 +16,6 @@ const getHabits = async (req, res) => {
   }
 };
 
-// Create a new habit
 const createHabit = async (req, res) => {
   try {
     const { name, description, frequency, target_count, color, icon } = req.body;
@@ -45,57 +44,35 @@ const createHabit = async (req, res) => {
   }
 };
 
-// Log or toggle a habit
 const logHabit = async (req, res) => {
   try {
-    const userId = req.user.id;
     const { id } = req.params;
-    const today = new Date().toISOString().split('T')[0];
+    const { date, count, notes } = req.body;
+    const logDate = date || new Date().toISOString().split('T')[0];
 
-    // Check if habit is already logged today
-    const { data: existing } = await supabase
-      .from('habit_logs')
-      .select('id, completed')
-      .eq('habit_id', id)
-      .eq('user_id', userId)
-      .eq('log_date', today)
-      .maybeSingle();
-
-    if (existing) {
-      // Toggle completed status
-      const { data, error } = await supabase
-        .from('habit_logs')
-        .update({ completed: !existing.completed })
-        .eq('id', existing.id)
-        .select()
-        .single();
-      if (error) throw error;
-
-      // Update streaks after toggle
-      await updateStreak(id);
-
-      return res.json({ success: true, data, toggled: true });
-    }
-
-    // Create new log entry
+    // Upsert log
     const { data, error } = await supabase
       .from('habit_logs')
-      .insert([{ habit_id: id, user_id: userId, log_date: today, completed: true }])
+      .upsert([{
+        habit_id: id,
+        log_date: logDate,
+        count: count || 1,
+        notes,
+        completed: true
+      }], { onConflict: 'habit_id,log_date' })
       .select()
       .single();
 
     if (error) throw error;
 
-    // Update streaks
+    // Update streak
     await updateStreak(id);
-
-    res.status(201).json({ success: true, data });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.json({ log: data });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to log habit' });
   }
 };
 
-// Update streak for a habit
 const updateStreak = async (habitId) => {
   try {
     const { data: logs } = await supabase
@@ -125,12 +102,9 @@ const updateStreak = async (habitId) => {
       current_streak: streak,
       longest_streak: Math.max(streak, habit?.longest_streak || 0)
     }).eq('id', habitId);
-  } catch (e) {
-    console.error('Error updating streak:', e);
-  }
+  } catch (e) { console.error(e); }
 };
 
-// Update habit details
 const updateHabit = async (req, res) => {
   try {
     const { id } = req.params;
@@ -149,7 +123,24 @@ const updateHabit = async (req, res) => {
   }
 };
 
-// Delete habit and its logs
+const unlogHabit = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const today = new Date().toISOString().split('T')[0];
+    const { error } = await supabase
+      .from('habit_logs')
+      .update({ completed: false })
+      .eq('habit_id', id)
+      .eq('log_date', today);
+
+    if (error) throw error;
+    await updateStreak(id);
+    res.json({ message: 'Habit unlogged' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to unlog habit' });
+  }
+};
+
 const deleteHabit = async (req, res) => {
   try {
     const { id } = req.params;
@@ -162,4 +153,4 @@ const deleteHabit = async (req, res) => {
   }
 };
 
-module.exports = { getHabits, createHabit, logHabit, updateHabit, deleteHabit };
+module.exports = { getHabits, createHabit, logHabit, unlogHabit, updateHabit, deleteHabit };

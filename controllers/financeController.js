@@ -1,196 +1,129 @@
-const { supabase } = require('../config/supabase');
+const supabase = require('../config/supabase');
 
-// Helper: get user_id from JWT
-const getUserId = (req) => req.user.id;
-
-// GET /api/finance
-// Query params: month (YYYY-MM), type (income|expense), limit, offset
-exports.getEntries = async (req, res) => {
+const getTransactions = async (req, res) => {
   try {
-    const userId = getUserId(req);
-    const { month, type, limit = 100, offset = 0 } = req.query;
+    const { type, start_date, end_date, period } = req.query;
 
-    let query = supabase
-      .from('finance_entries')
-      .select('*')
-      .eq('user_id', userId)
-      .order('entry_date', { ascending: false })
-      .range(offset, offset + limit - 1);
+    let start, end;
+    const today = new Date();
 
-    if (month) {
-      const start = `${month}-01`;
-      const end = new Date(month.split('-')[0], month.split('-')[1], 0)
-        .toISOString().split('T')[0];
-      query = query.gte('entry_date', start).lte('entry_date', end);
+    if (period === 'daily') {
+      start = today.toISOString().split('T')[0];
+      end = start;
+    } else if (period === 'weekly') {
+      const day = today.getDay();
+      const startD = new Date(today);
+      startD.setDate(today.getDate() - day);
+      start = startD.toISOString().split('T')[0];
+      end = today.toISOString().split('T')[0];
+    } else if (period === 'monthly') {
+      const startD = new Date(today.getFullYear(), today.getMonth(), 1);
+      start = startD.toISOString().split('T')[0];
+      end = today.toISOString().split('T')[0];
     }
 
+    let query = supabase
+      .from('finance_transactions')
+      .select('*')
+      .eq('user_id', req.user.id)
+      .order('date', { ascending: false });
+
     if (type) query = query.eq('type', type);
+    if (start_date || start) query = query.gte('date', start_date || start);
+    if (end_date || end) query = query.lte('date', end_date || end);
 
     const { data, error } = await query;
     if (error) throw error;
-
-    res.json({ success: true, data });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.json({ transactions: data });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to fetch transactions' });
   }
 };
 
-// GET /api/finance/summary
-// Returns: monthly summary for last 6 months + current month totals
-exports.getSummary = async (req, res) => {
+const createTransaction = async (req, res) => {
   try {
-    const userId = getUserId(req);
-    const { month } = req.query; // YYYY-MM
-
-    const targetMonth = month || new Date().toISOString().slice(0, 7);
-    const start = `${targetMonth}-01`;
-    const end = new Date(
-      targetMonth.split('-')[0],
-      targetMonth.split('-')[1],
-      0
-    ).toISOString().split('T')[0];
-
-    const { data, error } = await supabase
-      .from('finance_entries')
-      .select('type, amount, entry_date, category')
-      .eq('user_id', userId)
-      .gte('entry_date', start)
-      .lte('entry_date', end);
-
-    if (error) throw error;
-
-    const summary = data.reduce(
-      (acc, entry) => {
-        if (entry.type === 'income') acc.totalIncome += parseFloat(entry.amount);
-        else acc.totalExpense += parseFloat(entry.amount);
-        
-        // category breakdown
-        if (!acc.byCategory[entry.category]) acc.byCategory[entry.category] = 0;
-        if (entry.type === 'expense') acc.byCategory[entry.category] += parseFloat(entry.amount);
-        
-        return acc;
-      },
-      { totalIncome: 0, totalExpense: 0, byCategory: {} }
-    );
-
-    summary.netBalance = summary.totalIncome - summary.totalExpense;
-    summary.month = targetMonth;
-
-    res.json({ success: true, data: summary });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-};
-
-// GET /api/finance/monthly-trend
-// Returns last 6 months income vs expense for chart
-exports.getMonthlyTrend = async (req, res) => {
-  try {
-    const userId = getUserId(req);
-    const months = [];
-    
-    for (let i = 5; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(1);
-      d.setMonth(d.getMonth() - i);
-      const key = d.toISOString().slice(0, 7);
-      months.push(key);
-    }
-
-    const start = `${months[0]}-01`;
-    const { data, error } = await supabase
-      .from('finance_entries')
-      .select('type, amount, entry_date')
-      .eq('user_id', userId)
-      .gte('entry_date', start)
-      .order('entry_date');
-
-    if (error) throw error;
-
-    const trend = months.map(month => {
-      const monthEntries = data.filter(e => e.entry_date.startsWith(month));
-      const income = monthEntries
-        .filter(e => e.type === 'income')
-        .reduce((s, e) => s + parseFloat(e.amount), 0);
-      const expense = monthEntries
-        .filter(e => e.type === 'expense')
-        .reduce((s, e) => s + parseFloat(e.amount), 0);
-      const d = new Date(month + '-01');
-      return {
-        month: d.toLocaleString('default', { month: 'short', year: '2-digit' }),
-        income: Math.round(income * 100) / 100,
-        expense: Math.round(expense * 100) / 100,
-      };
-    });
-
-    res.json({ success: true, data: trend });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-};
-
-// POST /api/finance
-exports.createEntry = async (req, res) => {
-  try {
-    const userId = getUserId(req);
-    const { type, description, amount, category, entry_date, notes } = req.body;
-
-    if (!type || !description || !amount || !category) {
-      return res.status(400).json({ success: false, message: 'Missing required fields' });
+    const { item, amount, type, date, category, notes } = req.body;
+    if (!item || !amount || !type) {
+      return res.status(400).json({ error: 'Item, amount, and type are required' });
     }
 
     const { data, error } = await supabase
-      .from('finance_entries')
-      .insert([{ user_id: userId, type, description, amount, category, entry_date: entry_date || new Date().toISOString().split('T')[0], notes }])
+      .from('finance_transactions')
+      .insert([{
+        user_id: req.user.id,
+        item,
+        amount: parseFloat(amount),
+        type,
+        date: date || new Date().toISOString().split('T')[0],
+        category: category || 'general',
+        notes: notes || ''
+      }])
       .select()
       .single();
 
     if (error) throw error;
-    res.status(201).json({ success: true, data });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(201).json({ transaction: data });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to create transaction' });
   }
 };
 
-// PUT /api/finance/:id
-exports.updateEntry = async (req, res) => {
+const deleteTransaction = async (req, res) => {
   try {
-    const userId = getUserId(req);
     const { id } = req.params;
-    const updates = req.body;
-    delete updates.user_id; // prevent user_id hijacking
-
-    const { data, error } = await supabase
-      .from('finance_entries')
-      .update(updates)
-      .eq('id', id)
-      .eq('user_id', userId)
-      .select()
-      .single();
-
-    if (error) throw error;
-    if (!data) return res.status(404).json({ success: false, message: 'Not found' });
-    res.json({ success: true, data });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-};
-
-// DELETE /api/finance/:id
-exports.deleteEntry = async (req, res) => {
-  try {
-    const userId = getUserId(req);
-    const { id } = req.params;
-
     const { error } = await supabase
-      .from('finance_entries')
+      .from('finance_transactions')
       .delete()
       .eq('id', id)
-      .eq('user_id', userId);
+      .eq('user_id', req.user.id);
 
     if (error) throw error;
-    res.json({ success: true, message: 'Deleted successfully' });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.json({ message: 'Transaction deleted' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to delete transaction' });
   }
 };
+
+const getSummary = async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('finance_transactions')
+      .select('amount, type, date, category')
+      .eq('user_id', req.user.id)
+      .order('date', { ascending: true });
+
+    if (error) throw error;
+
+    const totalIncome = data.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
+    const totalExpense = data.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+    const netBalance = totalIncome - totalExpense;
+
+    // Monthly breakdown
+    const monthly = {};
+    data.forEach(t => {
+      const month = t.date.substring(0, 7); // yyyy-mm
+      if (!monthly[month]) monthly[month] = { income: 0, expense: 0 };
+      monthly[month][t.type] += t.amount;
+    });
+
+    const monthlyBreakdown = Object.entries(monthly).map(([month, vals]) => ({
+      month,
+      income: Math.round(vals.income * 100) / 100,
+      expense: Math.round(vals.expense * 100) / 100
+    }));
+
+    res.json({
+      totalIncome: Math.round(totalIncome * 100) / 100,
+      totalExpense: Math.round(totalExpense * 100) / 100,
+      netBalance: Math.round(netBalance * 100) / 100,
+      monthlyBreakdown
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to get summary' });
+  }
+};
+
+module.exports = { getTransactions, createTransaction, deleteTransaction, getSummary };
