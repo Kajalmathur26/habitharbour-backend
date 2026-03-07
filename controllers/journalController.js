@@ -40,7 +40,7 @@ const getEntry = async (req, res) => {
 
 const createEntry = async (req, res) => {
   try {
-    const { title, content, entry_date, mood, tags, is_private } = req.body;
+    const { title, content, entry_date, mood, tags, is_private, font_style, bg_color, image_url } = req.body;
 
     const { data, error } = await supabase
       .from('journal_entries')
@@ -49,9 +49,12 @@ const createEntry = async (req, res) => {
         title: title || 'Untitled Entry',
         content: content || '',
         entry_date: entry_date || new Date().toISOString().split('T')[0],
-        mood,
+        mood: mood || null,
         tags: tags || [],
-        is_private: is_private !== undefined ? is_private : true
+        is_private: is_private !== undefined ? is_private : true,
+        font_style: font_style || null,
+        bg_color: bg_color || null,
+        image_url: image_url || null
       }])
       .select()
       .single();
@@ -66,9 +69,12 @@ const createEntry = async (req, res) => {
 const updateEntry = async (req, res) => {
   try {
     const { id } = req.params;
+    const safeUpdates = { ...req.body, updated_at: new Date().toISOString() };
+    if (safeUpdates.mood === '') safeUpdates.mood = null;
+
     const { data, error } = await supabase
       .from('journal_entries')
-      .update({ ...req.body, updated_at: new Date().toISOString() })
+      .update(safeUpdates)
       .eq('id', id)
       .eq('user_id', req.user.id)
       .select()

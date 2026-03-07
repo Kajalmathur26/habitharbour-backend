@@ -34,7 +34,7 @@ const createTask = async (req, res) => {
         description,
         category: category || 'personal',
         priority: priority || 'medium',
-        due_date,
+        due_date: due_date ? due_date : null,
         tags: tags || [],
         status: 'pending',
         position: 0
@@ -54,9 +54,12 @@ const updateTask = async (req, res) => {
     const { id } = req.params;
     const updates = req.body;
 
+    const safeUpdates = { ...updates, updated_at: new Date().toISOString() };
+    if (safeUpdates.due_date === '') safeUpdates.due_date = null;
+
     const { data, error } = await supabase
       .from('tasks')
-      .update({ ...updates, updated_at: new Date().toISOString() })
+      .update(safeUpdates)
       .eq('id', id)
       .eq('user_id', req.user.id)
       .select()

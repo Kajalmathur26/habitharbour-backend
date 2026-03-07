@@ -77,7 +77,7 @@ const updateMood = async (req, res) => {
   try {
     const { id } = req.params;
     const { mood_score, mood_label, notes, emotions } = req.body;
-    const updates = {};
+    const updates = { updated_at: new Date().toISOString() };
     if (mood_score !== undefined) updates.mood_score = mood_score;
     if (mood_label !== undefined) updates.mood_label = mood_label;
     if (notes !== undefined) updates.notes = notes;
@@ -92,10 +92,12 @@ const updateMood = async (req, res) => {
       .single();
 
     if (error) throw error;
+    if (!data) return res.status(404).json({ error: 'Mood entry not found' });
     res.json({ mood: data });
   } catch (error) {
+    console.error('Update mood error:', error);
     res.status(500).json({ error: 'Failed to update mood' });
   }
 };
 
-module.exports = { getMoods, logMood, updateMood, getMoodStats };
+module.exports = { getMoods, logMood, getMoodStats, updateMood };

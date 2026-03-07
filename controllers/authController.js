@@ -14,7 +14,6 @@ const register = async (req, res) => {
       return res.status(400).json({ error: 'Name, email, and password are required' });
     }
 
-    // Check existing user
     const { data: existing } = await supabase
       .from('users')
       .select('id')
@@ -30,7 +29,7 @@ const register = async (req, res) => {
     const { data: user, error } = await supabase
       .from('users')
       .insert([{ name, email, password: hashedPassword, preferences: { theme: 'dark', accent: 'violet' } }])
-      .select('id, name, email, preferences, created_at')
+      .select('id, name, email, preferences, phone, avatar_url, created_at')
       .single();
 
     if (error) throw error;
@@ -53,7 +52,7 @@ const login = async (req, res) => {
 
     const { data: user, error } = await supabase
       .from('users')
-      .select('id, name, email, password, preferences')
+      .select('id, name, email, password, preferences, phone, avatar_url')
       .eq('email', email)
       .single();
 
@@ -82,45 +81,67 @@ const getProfile = async (req, res) => {
 
 const updateProfile = async (req, res) => {
   try {
-    const { name, preferences, phone, avatar } = req.body;
-    const updates = {};
-    if (name) updates.name = name;
-    if (preferences) updates.preferences = preferences;
+    const { name, preferences, phone, avatar_url } = req.body;
+    const updates = { updated_at: new Date().toISOString() };
+    if (name !== undefined) updates.name = name;
+    if (preferences !== undefined) updates.preferences = preferences;
     if (phone !== undefined) updates.phone = phone;
-    if (avatar !== undefined) updates.avatar = avatar;
+    if (avatar_url !== undefined) updates.avatar_url = avatar_url;
 
     const { data: user, error } = await supabase
       .from('users')
       .update(updates)
       .eq('id', req.user.id)
-      .select('id, name, email, preferences, phone, avatar')
+      .select('id, name, email, preferences, phone, avatar_url')
       .single();
 
     if (error) throw error;
     res.json({ user });
   } catch (error) {
+    console.error('Update profile error:', error);
     res.status(500).json({ error: 'Update failed' });
   }
 };
 
-const deleteAccount = async (req, res) => {
+const forgotPassword = async (req, res) => {
   try {
-    const userId = req.user.id;
-    // Delete all user data (cascade)
-    const tables = [
-      'tasks', 'journal_entries', 'goals', 'goal_milestones',
-      'habits', 'habit_logs', 'mood_logs', 'events', 'finance_transactions'
-    ];
-    for (const table of tables) {
-      await supabase.from(table).delete().eq('user_id', userId);
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'Email is required' });
+
+    // Check if user exists
+    const { data: user } = await supabase
+      .from('users')
+      .select('id, email')
+      .eq('email', email)
+      .single();
+
+    // Always return success to prevent email enumeration
+    if (!user) {
+      return res.json({ message: 'If an account exists with this email, a reset link has been sent.' });
     }
-    const { error } = await supabase.from('users').delete().eq('id', userId);
-    if (error) throw error;
-    res.json({ message: 'Account deleted successfully' });
+
+    // Generate reset token
+    const resetToken = jwt.sign(
+      { userId: user.id, type: 'password_reset' },
+      process.env.JWT_SECRET,
+      { expiresIn: '1h' }
+    );
+
+    // Store token in DB
+    await supabase.from('users').update({
+      reset_token: resetToken,
+      reset_token_expires: new Date(Date.now() + 3600000).toISOString()
+    }).eq('id', user.id);
+
+    // In production, send email here via nodemailer/SendGrid
+    // For now, we log the token (frontend would receive a link)
+    console.log(`Password reset token for ${email}: ${resetToken}`);
+
+    res.json({ message: 'If an account exists with this email, a reset link has been sent.' });
   } catch (error) {
-    console.error('Delete account error:', error);
-    res.status(500).json({ error: 'Failed to delete account' });
+    console.error('Forgot password error:', error);
+    res.status(500).json({ error: 'Failed to process request' });
   }
 };
 
-module.exports = { register, login, getProfile, updateProfile, deleteAccount };
+module.exports = { register, login, getProfile, updateProfile, forgotPassword };

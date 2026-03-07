@@ -9,7 +9,21 @@ const getGoals = async (req, res) => {
       .order('created_at', { ascending: false });
 
     if (error) throw error;
-    res.json({ goals: data });
+
+    // Compute sub-goal progress for each goal
+    const goals = data.map(g => {
+      const milestones = g.goal_milestones || [];
+      const total = milestones.length;
+      const completed = milestones.filter(m => m.completed).length;
+      return {
+        ...g,
+        milestone_progress: total > 0 ? Math.round((completed / total) * 100) : null,
+        milestone_count: total,
+        milestone_completed: completed,
+      };
+    });
+
+    res.json({ goals });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch goals' });
   }
@@ -27,7 +41,7 @@ const createGoal = async (req, res) => {
         title,
         description,
         category: category || 'personal',
-        target_date,
+        target_date: target_date ? target_date : null,
         target_value: target_value || 100,
         current_value: 0,
         unit: unit || '%',
@@ -37,7 +51,7 @@ const createGoal = async (req, res) => {
       .single();
 
     if (error) throw error;
-    res.status(201).json({ goal: data });
+    res.status(201).json({ goal: { ...data, goal_milestones: [], milestone_progress: null, milestone_count: 0, milestone_completed: 0 } });
   } catch (error) {
     res.status(500).json({ error: 'Failed to create goal' });
   }
@@ -46,9 +60,12 @@ const createGoal = async (req, res) => {
 const updateGoal = async (req, res) => {
   try {
     const { id } = req.params;
+    const safeUpdates = { ...req.body, updated_at: new Date().toISOString() };
+    if (safeUpdates.target_date === '') safeUpdates.target_date = null;
+
     const { data, error } = await supabase
       .from('goals')
-      .update({ ...req.body, updated_at: new Date().toISOString() })
+      .update(safeUpdates)
       .eq('id', id)
       .eq('user_id', req.user.id)
       .select()
@@ -91,4 +108,38 @@ const addMilestone = async (req, res) => {
   }
 };
 
-module.exports = { getGoals, createGoal, updateGoal, deleteGoal, addMilestone };
+const toggleMilestone = async (req, res) => {
+  try {
+    const { milestoneId } = req.params;
+    const { completed } = req.body;
+
+    const { data, error } = await supabase
+      .from('goal_milestones')
+      .update({ completed: completed, updated_at: new Date().toISOString() })
+      .eq('id', milestoneId)
+      .select()
+      .single();
+
+    if (error) throw error;
+    res.json({ milestone: data });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to toggle milestone' });
+  }
+};
+
+const deleteMilestone = async (req, res) => {
+  try {
+    const { milestoneId } = req.params;
+    const { error } = await supabase
+      .from('goal_milestones')
+      .delete()
+      .eq('id', milestoneId);
+
+    if (error) throw error;
+    res.json({ message: 'Milestone deleted' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to delete milestone' });
+  }
+};
+
+module.exports = { getGoals, createGoal, updateGoal, deleteGoal, addMilestone, toggleMilestone, deleteMilestone };
