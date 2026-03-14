@@ -103,4 +103,40 @@ const deleteEntry = async (req, res) => {
   }
 };
 
-module.exports = { getEntries, getEntry, createEntry, updateEntry, deleteEntry };
+// Upload journal image to Supabase Storage
+const uploadJournalImage = async (req, res) => {
+  try {
+    const { imageData, fileName, mimeType } = req.body;
+
+    if (!imageData) {
+      return res.status(400).json({ error: 'Image data is required' });
+    }
+
+    // Strip base64 prefix if present: "data:image/png;base64,..."
+    const base64Data = imageData.replace(/^data:[^;]+;base64,/, '');
+    const buffer = Buffer.from(base64Data, 'base64');
+
+    const ext = (mimeType || 'image/jpeg').split('/')[1] || 'jpg';
+    const uniqueName = `${req.user.id}/${Date.now()}_${fileName || 'upload'}.${ext}`;
+
+    const { data, error } = await supabase.storage
+      .from('journal-images')
+      .upload(uniqueName, buffer, {
+        contentType: mimeType || 'image/jpeg',
+        upsert: false,
+      });
+
+    if (error) throw error;
+
+    const { data: urlData } = supabase.storage
+      .from('journal-images')
+      .getPublicUrl(data.path);
+
+    res.json({ url: urlData.publicUrl });
+  } catch (error) {
+    console.error('Journal image upload error:', error);
+    res.status(500).json({ error: 'Failed to upload image' });
+  }
+};
+
+module.exports = { getEntries, getEntry, createEntry, updateEntry, deleteEntry, uploadJournalImage };

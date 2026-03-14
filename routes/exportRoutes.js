@@ -1,9 +1,9 @@
 const express = require('express');
 const router = express.Router();
-const { authMiddleware } = require('../middleware/authMiddleware');
+const { authenticate } = require('../middleware/auth');
 const { exportFinanceCSV, exportJournalText, exportProductivityJSON } = require('../controllers/exportController');
 
-router.use(authMiddleware);
+router.use(authenticate);
 
 router.get('/finance', exportFinanceCSV);
 router.get('/journal', exportJournalText);

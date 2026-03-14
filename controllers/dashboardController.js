@@ -52,4 +52,34 @@ const getDashboardData = async (req, res) => {
   }
 };
 
-module.exports = { getDashboardData };
+const getWeeklyReport = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const weekAgo = new Date(Date.now() - 8 * 86400000).toISOString().split('T')[0];
+
+    const { data: tasks, error } = await supabase
+      .from('tasks')
+      .select('status, created_at, updated_at')
+      .eq('user_id', userId)
+      .gte('created_at', weekAgo);
+
+    if (error) throw error;
+
+    const days = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(Date.now() - i * 86400000).toISOString().split('T')[0];
+      days.push({
+        date: d,
+        completed: tasks.filter(t => t.status === 'completed' && t.updated_at && t.updated_at.startsWith(d)).length,
+        added: tasks.filter(t => t.created_at && t.created_at.startsWith(d)).length
+      });
+    }
+
+    res.json({ data: days });
+  } catch (error) {
+    console.error('Weekly report error:', error);
+    res.status(500).json({ error: 'Failed to load weekly report' });
+  }
+};
+
+module.exports = { getDashboardData, getWeeklyReport };
