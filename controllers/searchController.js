@@ -1,6 +1,5 @@
-const supabase = require('../config/supabase');
+const searchModel = require('../models/searchModel');
 
-// ─── Search across tasks, goals, journal, moods ────────────────────── //
 const globalSearch = async (req, res) => {
     try {
         const { q } = req.query;
@@ -9,35 +8,9 @@ const globalSearch = async (req, res) => {
         }
 
         const search = q.trim();
+        const results = await searchModel.globalSearch(req.user.id, search);
 
-        const [tasksRes, goalsRes, journalRes] = await Promise.all([
-            supabase.from('tasks')
-                .select('id, title, description, status, priority, category')
-                .eq('user_id', req.user.id)
-                .ilike('title', `%${search}%`)
-                .limit(5),
-
-            supabase.from('goals')
-                .select('id, title, description, category, status')
-                .eq('user_id', req.user.id)
-                .ilike('title', `%${search}%`)
-                .limit(5),
-
-            supabase.from('journal_entries')
-                .select('id, title, entry_date, mood')
-                .eq('user_id', req.user.id)
-                .ilike('title', `%${search}%`)
-                .limit(5),
-        ]);
-
-        res.json({
-            results: {
-                tasks: tasksRes.data || [],
-                goals: goalsRes.data || [],
-                journal: journalRes.data || [],
-            },
-            query: search,
-        });
+        res.json({ results, query: search });
     } catch (error) {
         console.error('Search error:', error);
         res.status(500).json({ error: 'Search failed' });

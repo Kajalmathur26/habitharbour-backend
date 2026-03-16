@@ -1,14 +1,8 @@
-const supabase = require('../config/supabase');
+const exportModel = require('../models/exportModel');
 
 const exportFinanceCSV = async (req, res) => {
     try {
-        const { data: transactions, error } = await supabase
-            .from('finance')
-            .select('*')
-            .eq('user_id', req.user.id)
-            .order('date', { ascending: false });
-
-        if (error) throw error;
+        const transactions = await exportModel.getFinanceData(req.user.id);
 
         if (!transactions || transactions.length === 0) {
             return res.status(404).send('No finance records found.');
@@ -30,13 +24,7 @@ const exportFinanceCSV = async (req, res) => {
 
 const exportJournalText = async (req, res) => {
     try {
-        const { data: entries, error } = await supabase
-            .from('journal_entries')
-            .select('*')
-            .eq('user_id', req.user.id)
-            .order('entry_date', { ascending: false });
-
-        if (error) throw error;
+        const entries = await exportModel.getJournalData(req.user.id);
 
         if (!entries || entries.length === 0) {
             return res.status(404).send('No journal entries found.');
@@ -45,7 +33,6 @@ const exportJournalText = async (req, res) => {
         let content = 'My Journal Export\n\n';
         entries.forEach(entry => {
             content += `Date: ${entry.entry_date}\nTitle: ${entry.title}\nMood: ${entry.mood || 'N/A'}\n`;
-            // Strip HTML tags for simple text export
             const cleanText = entry.content.replace(/<[^>]+>/g, '');
             content += `Content:\n${cleanText}\n\n`;
             content += '-'.repeat(40) + '\n\n';
@@ -62,31 +49,7 @@ const exportJournalText = async (req, res) => {
 
 const exportProductivityJSON = async (req, res) => {
     try {
-        const { data: tasks, error: taskError } = await supabase
-            .from('tasks')
-            .select('title, status, due_date')
-            .eq('user_id', req.user.id);
-
-        const { data: habits, error: habitError } = await supabase
-            .from('habits')
-            .select('title, current_streak, completed_dates')
-            .eq('user_id', req.user.id);
-
-        if (taskError || habitError) throw new Error('Failed to fetch productivity data');
-
-        const exportData = {
-            exportDate: new Date().toISOString(),
-            tasksStats: {
-                total: tasks.length,
-                completed: tasks.filter(t => t.status === 'completed').length,
-            },
-            habits: habits.map(h => ({
-                name: h.title,
-                currentStreak: h.current_streak,
-                totalCompletedDays: h.completed_dates?.length || 0
-            }))
-        };
-
+        const exportData = await exportModel.getProductivityData(req.user.id);
         res.setHeader('Content-Type', 'application/json');
         res.setHeader('Content-Disposition', 'attachment; filename="productivity_report.json"');
         res.send(JSON.stringify(exportData, null, 2));

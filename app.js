@@ -16,6 +16,7 @@ const dashboardRoutes = require('./routes/dashboardRoutes');
 const financeRoutes = require('./routes/financeRoutes');
 const searchRoutes = require('./routes/searchRoutes');
 const exportRoutes = require('./routes/exportRoutes');
+const adminRoutes = require('./routes/adminRoutes');
 
 const app = express();
 
@@ -57,6 +58,7 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/finance', financeRoutes);
 app.use('/api/search', searchRoutes);
 app.use('/api/export', exportRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Health check
 app.get('/health', (req, res) => {
